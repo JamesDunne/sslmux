@@ -1,93 +1,47 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
 	"time"
 )
 
 import "github.com/JamesDunne/go-util/base"
 
-func hex_dump(b []byte) {
-	const digits = "0123456789abcdef"
-	line := make([]byte, 3*16+16)
-
-	lines := len(b) >> 4
-	remainder := len(b) & 15
-
-	log.Printf("\nLength: %d\n", len(b))
-	t := 0
-	for i := 0; i < lines; i++ {
-		for j := 0; j < 16; j++ {
-			d := b[t]
-			t++
-			line[j*3+0] = digits[(d>>4)&15]
-			line[j*3+1] = digits[d&15]
-			line[j*3+2] = ' '
-
-			if d >= 32 && d <= 127 {
-				line[16*3+j] = d
-			} else {
-				line[16*3+j] = '.'
-			}
-		}
-
-		log.Println(string(line))
-	}
-
-	if remainder > 0 {
-		for j := 0; j < remainder; j++ {
-			d := b[t]
-			t++
-			line[j*3+0] = digits[(d>>4)&15]
-			line[j*3+1] = digits[d&15]
-			line[j*3+2] = ' '
-
-			if d >= 32 && d <= 127 {
-				line[16*3+j] = d
-			} else {
-				line[16*3+j] = '.'
-			}
-		}
-
-		for j := remainder; j < 16; j++ {
-			line[j*3+0] = ' '
-			line[j*3+1] = ' '
-			line[j*3+2] = ' '
-			line[16*3+j] = ' '
-		}
-
-		log.Println(string(line))
-	}
-}
-
 const buffer_size = 4096
+const debug = false
 
 type conn struct {
 	c      net.Conn
+	logger *log.Logger
 	buffer []byte
 
 	packet0 []byte
 }
 
 func newConn(c net.Conn) *conn {
-	return &conn{c: c, buffer: make([]byte, buffer_size)}
+	return &conn{c: c, buffer: make([]byte, buffer_size), logger: log.New(os.Stderr, fmt.Sprintf("%s: ", c.RemoteAddr()), 0)}
 }
 
-const timeoutDuration = time.Millisecond * time.Duration(200)
+// 200ms timeout for SSH detection:
+const timeoutDuration = time.Millisecond * time.Duration(500)
 
 // Handles a single connection and sniffs the protocol:
 func (c *conn) serve() {
+	defer c.logger.Println("closed")
 	defer c.c.Close()
 
-	// Set a timeout on sniffing because some SSH clients (PuTTY) will wait eternally for incoming data before sending
-	// their first packets:
-	c.c.SetReadDeadline(time.Now().Add(timeoutDuration))
+	c.logger.Println("accepted")
 
 	var target_addr *base.Dialable
 	sniffed := false
 	for !sniffed {
+		// Set a timeout on sniffing because some SSH clients (PuTTY) will wait eternally for incoming data before sending
+		// their first packets:
+		c.c.SetReadDeadline(time.Now().Add(timeoutDuration))
 
 		// Read some data:
 		n, err := c.c.Read(c.buffer)
@@ -103,7 +57,9 @@ func (c *conn) serve() {
 		}
 
 		p := c.buffer[0:n]
-		hex_dump(p)
+		if debug {
+			base.HexDumpToLogger(p, c.logger)
+		}
 
 		// Check if TLS protocol:
 		if n < 3 {
@@ -114,7 +70,7 @@ func (c *conn) serve() {
 		if p[0] == 0x16 && p[1] == 0x03 && (p[2] >= 0x00 && p[2] <= 0x03) {
 			sniffed = true
 			target_addr = https_addr
-			log.Println("detected HTTPS")
+			c.logger.Println("detected HTTPS")
 			break
 		}
 
@@ -125,7 +81,7 @@ func (c *conn) serve() {
 		if p[0] == 'S' && p[1] == 'S' && p[2] == 'H' && p[3] == '-' {
 			sniffed = true
 			target_addr = ssh_addr
-			log.Println("detected SSH")
+			c.logger.Println("detected SSH")
 			break
 		}
 	}
@@ -136,7 +92,7 @@ func (c *conn) serve() {
 	// Now just copy data from in to out:
 	w, err := net.Dial(target_addr.Network, target_addr.Address)
 	if err != nil {
-		log.Printf("%s\n", err)
+		c.logger.Printf("%s\n", err)
 		return
 	}
 
