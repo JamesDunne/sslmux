@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"log"
+	"os"
 )
 
 import "github.com/JamesDunne/go-util/base"
@@ -30,6 +32,9 @@ func main() {
 	base.PanicIf(err)
 
 	// Start the server:
-	err = base.ServeMain(listen_addr, serveMux)
+	var sig os.Signal
+	sig, err = base.ServeMain(listen_addr, serveMux)
 	base.PanicIf(err)
+
+	log.Printf("caught signal %s\n", sig)
 }

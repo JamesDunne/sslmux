@@ -145,7 +145,7 @@ func (c *conn) serve() {
 	<-complete
 }
 
-func serveMux(l net.Listener) {
+func serveMux(l net.Listener) (err error) {
 	defer l.Close()
 	var tempDelay time.Duration // how long to sleep on accept failure
 	for {
@@ -164,7 +164,7 @@ func serveMux(l net.Listener) {
 				time.Sleep(tempDelay)
 				continue
 			}
-			panic(e)
+			return e
 		}
 		tempDelay = 0
 
@@ -172,4 +172,6 @@ func serveMux(l net.Listener) {
 		// Launch a goroutine to handle traffic:
 		go c.serve()
 	}
+
+	return nil
 }
