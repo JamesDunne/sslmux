@@ -19,11 +19,16 @@ type conn struct {
 	logger *log.Logger
 	buffer []byte
 
-	packet0 []byte
+	packet0 [][]byte
 }
 
 func newConn(c net.Conn) *conn {
-	return &conn{c: c, buffer: make([]byte, buffer_size), logger: log.New(os.Stderr, fmt.Sprintf("%s: ", c.RemoteAddr()), 0)}
+	return &conn{
+		c:       c,
+		buffer:  make([]byte, buffer_size),
+		logger:  log.New(os.Stderr, fmt.Sprintf("%s: ", c.RemoteAddr()), 0),
+		packet0: make([][]byte, 0, 5),
+	}
 }
 
 // 200ms timeout for SSH detection:
@@ -61,6 +66,9 @@ func (c *conn) serve() {
 			base.HexDumpToLogger(p, c.logger)
 		}
 
+		// Keep a rolling buffer of the packets we're sniffing so we can send them later:
+		c.packet0 = append(c.packet0, p)
+
 		// Check if TLS protocol:
 		if n < 3 {
 			continue
@@ -94,6 +102,11 @@ func (c *conn) serve() {
 	if err != nil {
 		c.logger.Printf("%s\n", err)
 		return
+	}
+
+	// Transmit first packet(s) that we sniffed:
+	for _, p := range c.packet0 {
+		w.Write(p)
 	}
 
 	io.Copy(w, c.c)

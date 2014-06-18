@@ -16,7 +16,7 @@ func main() {
 	var err error
 
 	// Define our commandline flags:
-	fl_listen_uri := flag.String("l", "tcp://0.0.0.0:444", "listen URI (schemes available are tcp, unix)")
+	fl_listen_uri := flag.String("l", "tcp://0.0.0.0:4444", "listen URI (schemes available are tcp, unix)")
 	fl_ssh_uri := flag.String("ssh", "tcp://localhost:22", "forward ssh traffic to an sshd listening at this URI")
 	fl_https_uri := flag.String("https", "tcp://localhost:443", "forward https traffic to an https service listening at this URI")
 	flag.Parse()
