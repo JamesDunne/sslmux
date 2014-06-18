@@ -149,6 +149,7 @@ func (c *conn) serve() {
 		}
 		return
 	}
+	defer server.Close()
 
 	// Transmit first packet(s) that we sniffed:
 	for _, p := range c.packet0 {
