@@ -39,18 +39,25 @@ func (c *conn) xmit(r io.Reader, w io.Writer, stop chan bool) {
 	for {
 		rn, err := r.Read(buffer)
 		if err != nil {
-			// TODO(jsd) error handling.
-			c.logger.Println(err)
+			if err == io.EOF {
+				return
+			}
+			if verbose {
+				c.logger.Println(err)
+			}
 			break
 		}
 
 		_, err = w.Write(buffer[:rn])
 		if err != nil {
-			// TODO(jsd) error handling.
-			c.logger.Println(err)
+			if err == io.EOF {
+				return
+			}
+			if verbose {
+				c.logger.Println(err)
+			}
 			break
 		}
-		// TODO(jsd): loop until wn == rn?
 	}
 
 	stop <- true
@@ -60,10 +67,14 @@ func (c *conn) xmit(r io.Reader, w io.Writer, stop chan bool) {
 func (c *conn) serve() {
 	client := c.c
 
-	defer c.logger.Println("closed")
+	if verbose {
+		defer c.logger.Println("closed")
+	}
 	defer client.Close()
 
-	c.logger.Println("accepted")
+	if verbose {
+		c.logger.Println("accepted")
+	}
 
 	var target_addr *base.Dialable
 	sniffed := false
@@ -74,9 +85,14 @@ func (c *conn) serve() {
 
 		// Read some data:
 		n, err := client.Read(c.buffer)
+		if err == io.EOF {
+			return
+		}
 		if _, ok := err.(net.Error); ok {
 			// Timed out; assume SSH:
-			c.logger.Println("timed out; assuming SSH")
+			if verbose {
+				c.logger.Println("timed out; assuming SSH")
+			}
 			sniffed = true
 			target_addr = ssh_addr
 			break
@@ -86,7 +102,7 @@ func (c *conn) serve() {
 		}
 
 		p := c.buffer[0:n]
-		if debug {
+		if debug && verbose {
 			base.HexDumpToLogger(p, c.logger)
 		}
 
@@ -102,7 +118,9 @@ func (c *conn) serve() {
 		if p[0] == 0x16 && p[1] == 0x03 && (p[2] >= 0x00 && p[2] <= 0x03) {
 			sniffed = true
 			target_addr = https_addr
-			c.logger.Println("detected HTTPS")
+			if verbose {
+				c.logger.Println("detected HTTPS")
+			}
 			break
 		}
 
@@ -113,7 +131,9 @@ func (c *conn) serve() {
 		if p[0] == 'S' && p[1] == 'S' && p[2] == 'H' && p[3] == '-' {
 			sniffed = true
 			target_addr = ssh_addr
-			c.logger.Println("detected SSH")
+			if verbose {
+				c.logger.Println("detected SSH")
+			}
 			break
 		}
 	}
@@ -124,18 +144,22 @@ func (c *conn) serve() {
 	// Now just copy data from in to out:
 	server, err := net.Dial(target_addr.Network, target_addr.Address)
 	if err != nil {
-		c.logger.Printf("%s\n", err)
+		if verbose {
+			c.logger.Printf("%s\n", err)
+		}
 		return
 	}
 
-	complete := make(chan bool, 1)
-
 	// Transmit first packet(s) that we sniffed:
 	for _, p := range c.packet0 {
-		server.Write(p)
+		_, err = server.Write(p)
+		if err == io.EOF {
+			return
+		}
 	}
 
 	// Start proxying traffic both ways:
+	complete := make(chan bool, 1)
 
 	// From client to server:
 	go c.xmit(client, server, complete)

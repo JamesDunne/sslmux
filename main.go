@@ -12,6 +12,7 @@ var (
 	listen_addr *base.Listenable
 	ssh_addr    *base.Dialable
 	https_addr  *base.Dialable
+	verbose     bool
 )
 
 func main() {
@@ -21,6 +22,7 @@ func main() {
 	fl_listen_uri := flag.String("l", "tcp://0.0.0.0:4444", "listen URI (schemes available are tcp, unix)")
 	fl_ssh_uri := flag.String("ssh", "tcp://localhost:22", "forward ssh traffic to an sshd listening at this URI")
 	fl_https_uri := flag.String("https", "tcp://localhost:443", "forward https traffic to an https service listening at this URI")
+	flag.BoolVar(&verbose, "v", false, "verbose logging")
 	flag.Parse()
 
 	// Parse all the URIs:
@@ -34,7 +36,10 @@ func main() {
 	// Start the server:
 	var sig os.Signal
 	sig, err = base.ServeMain(listen_addr, serveMux)
-	base.PanicIf(err)
-
-	log.Printf("caught signal %s\n", sig)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if sig != nil {
+		log.Printf("\ncaught signal %s\n", sig)
+	}
 }
