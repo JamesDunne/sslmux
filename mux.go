@@ -76,7 +76,7 @@ func (c *conn) serve() {
 		n, err := client.Read(c.buffer)
 		if _, ok := err.(net.Error); ok {
 			// Timed out; assume SSH:
-			log.Println("timed out; assuming SSH")
+			c.logger.Println("timed out; assuming SSH")
 			sniffed = true
 			target_addr = ssh_addr
 			break
@@ -160,7 +160,7 @@ func serveMux(l net.Listener) (err error) {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				log.Printf("http: Accept error: %v; retrying in %v\n", e, tempDelay)
+				log.Printf("Accept error: %v; retrying in %v\n", e, tempDelay)
 				time.Sleep(tempDelay)
 				continue
 			}
