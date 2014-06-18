@@ -34,10 +34,34 @@ func newConn(c net.Conn) *conn {
 // 200ms timeout for SSH detection:
 const timeoutDuration = time.Millisecond * time.Duration(500)
 
+func (c *conn) xmit(r io.Reader, w io.Writer, stop chan bool) {
+	buffer := make([]byte, buffer_size)
+	for {
+		rn, err := r.Read(buffer)
+		if err != nil {
+			// TODO(jsd) error handling.
+			c.logger.Println(err)
+			break
+		}
+
+		_, err = w.Write(buffer[:rn])
+		if err != nil {
+			// TODO(jsd) error handling.
+			c.logger.Println(err)
+			break
+		}
+		// TODO(jsd): loop until wn == rn?
+	}
+
+	stop <- true
+}
+
 // Handles a single connection and sniffs the protocol:
 func (c *conn) serve() {
+	client := c.c
+
 	defer c.logger.Println("closed")
-	defer c.c.Close()
+	defer client.Close()
 
 	c.logger.Println("accepted")
 
@@ -46,10 +70,10 @@ func (c *conn) serve() {
 	for !sniffed {
 		// Set a timeout on sniffing because some SSH clients (PuTTY) will wait eternally for incoming data before sending
 		// their first packets:
-		c.c.SetReadDeadline(time.Now().Add(timeoutDuration))
+		client.SetReadDeadline(time.Now().Add(timeoutDuration))
 
 		// Read some data:
-		n, err := c.c.Read(c.buffer)
+		n, err := client.Read(c.buffer)
 		if _, ok := err.(net.Error); ok {
 			// Timed out; assume SSH:
 			log.Println("timed out; assuming SSH")
@@ -95,21 +119,30 @@ func (c *conn) serve() {
 	}
 
 	// Clear the deadline:
-	c.c.SetReadDeadline(time.Time{})
+	client.SetReadDeadline(time.Time{})
 
 	// Now just copy data from in to out:
-	w, err := net.Dial(target_addr.Network, target_addr.Address)
+	server, err := net.Dial(target_addr.Network, target_addr.Address)
 	if err != nil {
 		c.logger.Printf("%s\n", err)
 		return
 	}
 
+	complete := make(chan bool, 1)
+
 	// Transmit first packet(s) that we sniffed:
 	for _, p := range c.packet0 {
-		w.Write(p)
+		server.Write(p)
 	}
 
-	io.Copy(w, c.c)
+	// Start proxying traffic both ways:
+
+	// From client to server:
+	go c.xmit(client, server, complete)
+	go c.xmit(server, client, complete)
+
+	// Wait until either end closes:
+	<-complete
 }
 
 func serveMux(l net.Listener) {
