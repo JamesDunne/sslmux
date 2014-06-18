@@ -1,10 +1,13 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net"
 	"time"
 )
+
+import "github.com/JamesDunne/go-util/base"
 
 func hex_dump(b []byte) {
 	const digits = "0123456789abcdef"
@@ -72,14 +75,29 @@ func newConn(c net.Conn) *conn {
 	return &conn{c: c, buffer: make([]byte, buffer_size)}
 }
 
+const timeoutDuration = time.Millisecond * time.Duration(200)
+
 // Handles a single connection and sniffs the protocol:
 func (c *conn) serve() {
 	defer c.c.Close()
 
+	// Set a timeout on sniffing because some SSH clients (PuTTY) will wait eternally for incoming data before sending
+	// their first packets:
+	c.c.SetReadDeadline(time.Now().Add(timeoutDuration))
+
+	var target_addr *base.Dialable
 	sniffed := false
 	for !sniffed {
+
 		// Read some data:
 		n, err := c.c.Read(c.buffer)
+		if _, ok := err.(net.Error); ok {
+			// Timed out; assume SSH:
+			log.Println("timed out; assuming SSH")
+			sniffed = true
+			target_addr = ssh_addr
+			break
+		}
 		if err != nil {
 			return
 		}
@@ -87,17 +105,42 @@ func (c *conn) serve() {
 		p := c.buffer[0:n]
 		hex_dump(p)
 
+		// Check if TLS protocol:
 		if n < 3 {
 			continue
 		}
-
-		if p[0] == 0x16 && p[1] == 0x03 && (p[2] >= 0 && p[2] <= 0x03) {
+		// TLS packet starts with a record "Hello" (0x16), followed by version (0x03 0x00-0x03) (RFC6101 A.1)
+		// Reject SSLv2 and lower versions (RFC6176):
+		if p[0] == 0x16 && p[1] == 0x03 && (p[2] >= 0x00 && p[2] <= 0x03) {
+			sniffed = true
+			target_addr = https_addr
+			log.Println("detected HTTPS")
+			break
 		}
-		sniffed = true
+
+		// Check if SSH protocol:
+		if n < 4 {
+			continue
+		}
+		if p[0] == 'S' && p[1] == 'S' && p[2] == 'H' && p[3] == '-' {
+			sniffed = true
+			target_addr = ssh_addr
+			log.Println("detected SSH")
+			break
+		}
 	}
 
-	// Now just copy data from in to out:
+	// Clear the deadline:
+	c.c.SetReadDeadline(time.Time{})
 
+	// Now just copy data from in to out:
+	w, err := net.Dial(target_addr.Network, target_addr.Address)
+	if err != nil {
+		log.Printf("%s\n", err)
+		return
+	}
+
+	io.Copy(w, c.c)
 }
 
 func serveMux(l net.Listener) {
