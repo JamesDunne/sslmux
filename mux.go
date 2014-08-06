@@ -31,36 +31,74 @@ func newConn(c net.Conn) *conn {
 	}
 }
 
-// 200ms timeout for SSH detection:
+// 500ms timeout for SSH detection:
 const timeoutDuration = time.Millisecond * time.Duration(500)
 
-func (c *conn) xmit(r io.Reader, w io.Writer, stop chan bool) {
+func (c *conn) handleError(err error, logger *log.Logger) (doContinue bool) {
+	// EOF = connection closed?
+	if err == io.EOF {
+		if verbose {
+			logger.Printf("io.EOF: %s\n", err.Error())
+		}
+		return
+	}
+	// Specific network error:
+	if netError, ok := err.(net.Error); ok {
+		// I/O Timeout:
+		if netError.Timeout() {
+			return true
+		}
+
+		// Do we continue?
+		if netError.Temporary() {
+			if verbose {
+				logger.Printf("temporary net.Error: %s\n", err.Error())
+			}
+			return true
+		} else {
+			if verbose {
+				logger.Printf("permanent net.Error: %s\n", err.Error())
+			}
+			return false
+		}
+	} else {
+		// Don't know what kind of error:
+		if verbose {
+			logger.Printf("permanent error: %s\n", err.Error())
+		}
+	}
+	return false
+}
+
+// Goroutine to handle transmitting packets from one socket to another:
+func (c *conn) xmit(r io.Reader, w io.Writer, stop chan bool, logger *log.Logger) {
 	buffer := make([]byte, buffer_size)
 	for {
+		// 5 second read deadline so that we don't get lots of CLOSE_WAIT sockets:
+		r.(*net.TCPConn).SetReadDeadline(time.Now().Add(time.Millisecond * time.Duration(5000)))
 		rn, err := r.Read(buffer)
 		if err != nil {
-			if err == io.EOF {
-				return
+			if c.handleError(err, logger) {
+				continue
+			} else {
+				break
 			}
-			if verbose {
-				c.logger.Println(err)
-			}
-			break
 		}
 
 		_, err = w.Write(buffer[:rn])
 		if err != nil {
-			if err == io.EOF {
-				return
+			if c.handleError(err, logger) {
+				continue
+			} else {
+				break
 			}
-			if verbose {
-				c.logger.Println(err)
-			}
-			break
 		}
 	}
 
 	stop <- true
+	if verbose {
+		logger.Println("stopped")
+	}
 }
 
 // Handles a single connection and sniffs the protocol:
@@ -163,11 +201,15 @@ func (c *conn) serve() {
 	complete := make(chan bool, 1)
 
 	// From client to server:
-	go c.xmit(client, server, complete)
-	go c.xmit(server, client, complete)
+	go c.xmit(client, server, complete, log.New(os.Stderr, fmt.Sprintf("%s; client->server: ", c.c.RemoteAddr()), 0))
+	go c.xmit(server, client, complete, log.New(os.Stderr, fmt.Sprintf("%s; server->client: ", c.c.RemoteAddr()), 0))
 
 	// Wait until either end closes:
 	<-complete
+
+	if verbose {
+		c.logger.Println("complete")
+	}
 }
 
 func serveMux(l net.Listener) (err error) {
