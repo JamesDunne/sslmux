@@ -31,8 +31,8 @@ func newConn(c net.Conn) *conn {
 	}
 }
 
-// timeout for SSH detection:
-const timeoutDuration = time.Millisecond * 500
+// 500ms timeout for SSH detection:
+const timeoutDuration = time.Millisecond * time.Duration(500)
 
 func (c *conn) handleError(err error, logger *log.Logger) (doContinue bool) {
 	// EOF = connection closed?
