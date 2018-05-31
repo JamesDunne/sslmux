@@ -31,8 +31,8 @@ func newConn(c net.Conn) *conn {
 	}
 }
 
-// 500ms timeout for SSH detection:
-const timeoutDuration = time.Millisecond * time.Duration(500)
+// timeout for SSH detection:
+const timeoutDuration = time.Millisecond * 500
 
 func (c *conn) handleError(err error, logger *log.Logger) (doContinue bool) {
 	// EOF = connection closed?
@@ -171,6 +171,17 @@ func (c *conn) serve() {
 			target_addr = ssh_addr
 			if verbose {
 				c.logger.Println("detected SSH")
+			}
+			break
+		}
+
+		// if we got 4 or more bytes and didn't detected any protocol
+		// redirecting it to others
+		if n >= 4 && others_addr != nil {
+			sniffed = true
+			target_addr = others_addr
+			if verbose {
+				c.logger.Println("unknown protocol")
 			}
 			break
 		}
