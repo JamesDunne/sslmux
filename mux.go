@@ -175,7 +175,7 @@ func (c *conn) serve() {
 			break
 		}
 
-		// if we got 4 or more bytes and didn't detected any protocol
+		// if we got 4 or more bytes and haven't detected any protocol
 		// redirecting it to others
 		if n >= 4 && others_addr != nil {
 			sniffed = true
